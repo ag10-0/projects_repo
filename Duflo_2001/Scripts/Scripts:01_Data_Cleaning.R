@@ -1,6 +1,6 @@
 # ------------------------------------------------------------------------------
 # Script: 01_Data_Cleaning.R
-# Purpose: Clean data (Auto-fixes the "Download ZIP" LFS bug)
+# Purpose: Clean data 
 # ------------------------------------------------------------------------------
 
 if (!require("pacman")) install.packages("pacman")
@@ -32,7 +32,7 @@ if (file_size_kb < 5) {
   message(">> Auto-downloading the real 573MB dataset from GitHub...")
   message("----------------------------------------------------------------")
   
-  # Your specific Raw Git LFS URL
+  # The specific Raw Git LFS URL
   raw_url <- "https://github.com/ag10-0/projects_repo/raw/main/Duflo_2001/Original_Data/cleaned_supas.dta"
   
   # Increase timeout to 30 mins for 573MB file
