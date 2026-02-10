@@ -1,50 +1,61 @@
 # ------------------------------------------------------------------------------
 # Script: 01_Data_Cleaning.R
-# Purpose: Clean local data 
+# Purpose: Clean data (Auto-fixes the "Download ZIP" LFS bug)
 # ------------------------------------------------------------------------------
 
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(data.table, readstata13, magrittr)
+pacman::p_load(data.table, readstata13, utils)
 
-# 1. robust File Finding -------------------------------------------------------
-# This block checks where R is currently "looking" and adjusts the path.
-
+# 1. Smart Path Finding --------------------------------------------------------
 target_file <- "cleaned_supas.dta"
-
-# Check Option A: We are in the Project Root (Ideal)
-path_a <- file.path("Original_Data", target_file)
-
-# Check Option B: We are inside the Scripts folder (Common issue)
-path_b <- file.path("..", "Original_Data", target_file)
+path_a <- file.path("Original_Data", target_file)      # Run from Root
+path_b <- file.path("..", "Original_Data", target_file) # Run from Scripts
 
 if (file.exists(path_a)) {
   final_path <- path_a
-  cat("Found data at:", path_a, "\n")
 } else if (file.exists(path_b)) {
   final_path <- path_b
-  cat("Found data at:", path_b, "\n")
 } else {
-  # If both fail, print the current location so you can see the mismatch
-  cat("--------------------------------------------------\n")
-  cat("CRITICAL ERROR: Data not found.\n")
-  cat("R is currently looking in:", getwd(), "\n")
-  cat("It was looking for 'Original_Data' folder here or one level up.\n")
-  cat("--------------------------------------------------\n")
-  stop("Please make sure 'Original_Data' exists next to the 'Scripts' folder.")
+  stop("CRITICAL: 'Original_Data' folder missing. Please ensure directory structure is correct.")
 }
 
-# 2. Load Data -----------------------------------------------------------------
+# 2. THE FIX: Check if file is the "Fake" LFS Pointer --------------------------
+# GitHub ZIP downloads replace large files with 1KB text pointers.
+# If we detect a tiny file (< 2KB), we force-download the real 573MB data.
+
+file_size_kb <- file.info(final_path)$size / 1024
+
+if (file_size_kb < 5) {
+  message("----------------------------------------------------------------")
+  message("DETECTED LFS POINTER (File is too small to be real data).")
+  message("The user likely downloaded via 'Download ZIP'.")
+  message(">> Auto-downloading the real 573MB dataset from GitHub...")
+  message("----------------------------------------------------------------")
+  
+  # Your specific Raw Git LFS URL
+  raw_url <- "https://github.com/ag10-0/projects_repo/raw/main/Duflo_2001/Original_Data/cleaned_supas.dta"
+  
+  # Increase timeout to 30 mins for 573MB file
+  options(timeout = 1800) 
+  
+  tryCatch({
+    download.file(raw_url, final_path, mode = "wb")
+    message("Download Complete. Proceeding with analysis.")
+  }, error = function(e) {
+    stop("Download failed. Please check your internet connection.")
+  })
+} else {
+  message("Data file verified (Size: ", round(file_size_kb/1024, 2), " MB).")
+}
+
+# 3. Load & Process ------------------------------------------------------------
 cols_to_keep <- c("sex", "birthyr", "yrschl", "incwage", 
                   "nin", "en71", "wtper", "kab", "birthpl") 
 
-# Load using the path we found above
-raw_data <- read.dta13(final_path, 
-                       select.cols = cols_to_keep, 
-                       convert.factors = FALSE)
-
+raw_data <- read.dta13(final_path, select.cols = cols_to_keep, convert.factors = FALSE)
 dt <- as.data.table(raw_data)
 
-# 3. Filter & Process ----------------------------------------------------------
+# 4. Clean Variables -----------------------------------------------------------
 dt_clean <- dt[sex == 1 & birthyr >= 1950 & birthyr <= 1972]
 
 dt_clean[, cohort := fcase(
@@ -56,10 +67,8 @@ dt_clean[, cohort := fcase(
 dt_clean[, ln_wage := ifelse(incwage > 0, log(incwage), NA)]
 dt_clean[, is_young := ifelse(cohort == "Young", 1, 0)]
 
-# 4. Save (Also with Smart Path) -----------------------------------------------
-# If we are in Scripts (Option B), we need to save one level up
+# 5. Save Output ---------------------------------------------------------------
 output_dir <- ifelse(final_path == path_b, "../Analysis_Data", "Analysis_Data")
-
 if (!dir.exists(output_dir)) dir.create(output_dir)
 
 save_path <- file.path(output_dir, "duflo_analytic_sample.rds")
